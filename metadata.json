@@ -1,0 +1,6 @@
+{
+  "name": "Translatewala Professional",
+  "description": "Agency management platform with offline support, real-time multi-device sync, owner payout tracking for Mohiyuddin & Shafiulla, and financial transaction history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
