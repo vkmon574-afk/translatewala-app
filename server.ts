@@ -526,7 +526,7 @@ app.post('/api/transactions', (req, res) => {
     status: transaction.status || 'Paid',
     date: transaction.date || new Date().toISOString().split('T')[0],
     method: transaction.method || 'UPI',
-    paidByOwner: transaction.paidByOwner, // 'Mohiyuddin' or 'Shafiulla'
+    paidByOwner: transaction.paidByOwner,
     employeeId: transaction.employeeId,
     employeeName: transaction.employeeName,
     clientName: transaction.clientName,
@@ -537,7 +537,6 @@ app.post('/api/transactions', (req, res) => {
 
   currentState.transactions.unshift(newTx);
 
-  // If this is an employee payout, update team member's paid / pending records
   if (newTx.type === 'employee_payout' && newTx.employeeId) {
     const teamMember = currentState.team.find((t) => t.id === newTx.employeeId);
     if (teamMember) {
@@ -597,9 +596,10 @@ app.post('/api/payouts', (req, res) => {
   res.json({ success: true, transaction: newTx, appState: currentState });
 });
 
-// Create/Update Project
+// Create/Update Project with Automatic Income Entry
 app.post('/api/projects', (req, res) => {
   const { project, deviceId } = req.body as { project: Partial<Project>; deviceId?: string };
+  const projId = project.id || `proj-${Date.now()}`;
 
   if (project.id) {
     const idx = currentState.projects.findIndex((p) => p.id === project.id);
@@ -612,21 +612,45 @@ app.post('/api/projects', (req, res) => {
     }
   } else {
     const newProj: Project = {
-      id: `proj-${Date.now()}`,
+      id: projId,
       title: project.title || 'New Project',
       clientName: project.clientName || 'Direct Client',
       sourceLang: project.sourceLang || 'Arabic',
       targetLang: project.targetLang || 'English',
       workType: project.workType || 'Document',
       assignedTo: project.assignedTo || 'Unassigned',
-      deadline: project.deadline || 'In 7 days',
+      deadline: project.deadline || 'In 5 days',
       clientCharge: Number(project.clientCharge) || 0,
-      estProfit: Number(project.estProfit) || 0,
+      clientPaymentStatus: project.clientPaymentStatus || 'Paid',
+      employeePayout: Number(project.employeePayout) || 0,
+      employeePayoutStatus: project.employeePayoutStatus || 'Pending',
+      estProfit: (Number(project.clientCharge) || 0) - (Number(project.employeePayout) || 0),
       status: project.status || 'In Progress',
       notes: project.notes || '',
       updatedAt: new Date().toISOString()
     };
     currentState.projects.unshift(newProj);
+  }
+
+  // Auto-record Income transaction if payment is Paid/Received
+  if (project.clientPaymentStatus === 'Paid' || project.status === 'Paid') {
+    const existingTx = currentState.transactions.find((t) => t.projectId === projId);
+    if (!existingTx) {
+      const newTx: Transaction = {
+        id: `tx-recv-${Date.now()}`,
+        title: `Payment Received: ${project.title}`,
+        amount: Number(project.clientCharge) || 0,
+        type: 'income',
+        category: 'Income',
+        status: 'Paid',
+        date: new Date().toISOString().split('T')[0],
+        method: 'UPI',
+        clientName: project.clientName,
+        projectId: projId,
+        createdAt: new Date().toISOString()
+      };
+      currentState.transactions.unshift(newTx);
+    }
   }
 
   saveState(currentState);
