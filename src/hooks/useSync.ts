@@ -148,7 +148,6 @@ export function useSync() {
         try {
           const parsed = JSON.parse(event.data);
           if (parsed.type === 'init' || parsed.type === 'sync_update') {
-            // Ignore updates that came from this device if we've local changes
             if (parsed.sourceDeviceId !== deviceId && parsed.data) {
               setState(parsed.data);
             }
@@ -160,7 +159,6 @@ export function useSync() {
 
       eventSource.onerror = () => {
         setIsLiveSynced(false);
-        // Retry connection gracefully
       };
     } catch (err) {
       setIsLiveSynced(false);
@@ -176,7 +174,6 @@ export function useSync() {
   // Actions
   const recordTransaction = useCallback(
     async (tx: Partial<Transaction>) => {
-      // Optimistic update
       const newTx: Transaction = {
         id: `tx-opt-${Date.now()}`,
         title: tx.title || 'Entry',
@@ -261,7 +258,6 @@ export function useSync() {
       referenceId?: string;
       notes?: string;
     }) => {
-      // Optimistic update
       const targetEmp = state.team.find((t) => t.id === payoutData.employeeId);
       const empName = targetEmp ? targetEmp.name : 'Employee';
 
@@ -336,16 +332,16 @@ export function useSync() {
 
   const addOrUpdateProject = useCallback(
     async (projData: Partial<Project>) => {
-      // Optimistic state
+      // Optimistic state update
       setState((prev) => {
         let updatedProjects = [...prev.projects];
-        let updatedClients = [...prev.clients];
+        let updatedClients = [...(prev.clients || [])];
         let updatedTransactions = [...prev.transactions];
 
         const projId = projData.id || `proj-${Date.now()}`;
         const clientCharge = Number(projData.clientCharge) || 0;
         const employeePayout = Number(projData.employeePayout) || 0;
-        const clientStatus = projData.clientPaymentStatus || 'Pending';
+        const clientStatus = projData.clientPaymentStatus || 'Paid';
         const empStatus = projData.employeePayoutStatus || 'Pending';
 
         const newP: Project = {
@@ -356,7 +352,7 @@ export function useSync() {
           targetLang: projData.targetLang || 'English',
           workType: projData.workType || 'Document',
           assignedTo: projData.assignedTo || 'Unassigned',
-          deadline: projData.deadline || 'In 7 days',
+          deadline: projData.deadline || 'In 5 days',
           clientCharge,
           clientPaymentStatus: clientStatus,
           employeePayout,
@@ -375,73 +371,25 @@ export function useSync() {
           updatedProjects.unshift(newP);
         }
 
-        // Auto-add or update Client
-        if (newP.clientName) {
-          const clientIdx = updatedClients.findIndex(
-            (c) => c.name.toLowerCase() === newP.clientName.toLowerCase()
-          );
-          if (clientIdx >= 0) {
-            const existingClient = updatedClients[clientIdx];
-            updatedClients[clientIdx] = {
-              ...existingClient,
-              totalProjectsCount: (existingClient.totalProjectsCount || 0) + (projData.id ? 0 : 1),
-              totalBusinessVolume: (existingClient.totalBusinessVolume || 0) + (projData.id ? 0 : clientCharge),
-              pendingAmount: clientStatus === 'Pending' ? (existingClient.pendingAmount || 0) + clientCharge : existingClient.pendingAmount,
-              paidAmount: clientStatus === 'Paid' ? (existingClient.paidAmount || 0) + clientCharge : existingClient.paidAmount
-            };
-          } else {
-            updatedClients.push({
-              id: `cli-${Date.now()}`,
-              name: newP.clientName,
-              company: newP.clientName,
-              totalProjectsCount: 1,
-              totalBusinessVolume: clientCharge,
-              paidAmount: clientStatus === 'Paid' ? clientCharge : 0,
-              pendingAmount: clientStatus === 'Pending' ? clientCharge : 0
-            });
-          }
-        }
-
-        // Auto-create transactions for new project
-        if (!projData.id) {
-          if (clientCharge > 0) {
+        // Auto-create income transaction if marked Paid/Received
+        if (clientStatus === 'Paid' || projData.status === 'Paid') {
+          const exists = updatedTransactions.some((t) => t.projectId === projId);
+          if (!exists) {
             const incomeTx: Transaction = {
               id: `tx-inc-${Date.now()}`,
-              title: `Payment: ${newP.title}`,
+              title: `Payment Received: ${newP.title}`,
               amount: clientCharge,
               type: 'income',
               category: 'Income',
-              status: clientStatus,
+              status: 'Paid',
               date: new Date().toISOString().split('T')[0],
-              method: 'Bank Transfer',
+              method: 'UPI',
               clientName: newP.clientName,
               projectId: projId,
-              notes: `Auto-created entry for project ${newP.title}`,
+              notes: `Auto income entry for project ${newP.title}`,
               createdAt: new Date().toISOString()
             };
             updatedTransactions.unshift(incomeTx);
-          }
-
-          if (employeePayout > 0 && newP.assignedTo && newP.assignedTo !== 'Unassigned') {
-            const empObj = prev.team.find(
-              (t) => t.name.toLowerCase() === newP.assignedTo.toLowerCase()
-            );
-            const payoutTx: Transaction = {
-              id: `tx-emp-${Date.now() + 1}`,
-              title: `Payout: ${newP.title} (${newP.assignedTo})`,
-              amount: employeePayout,
-              type: 'employee_payout',
-              category: 'Employee Payout',
-              status: empStatus,
-              date: new Date().toISOString().split('T')[0],
-              method: 'UPI',
-              employeeId: empObj?.id,
-              employeeName: newP.assignedTo,
-              projectId: projId,
-              notes: `Auto-created payout for project ${newP.title}`,
-              createdAt: new Date().toISOString()
-            };
-            updatedTransactions.unshift(payoutTx);
           }
         }
 
@@ -453,6 +401,21 @@ export function useSync() {
           lastSyncTimestamp: new Date().toISOString()
         };
       });
+
+      // Send webhook to Google Sheet
+      const webhookUrl = localStorage.getItem('gsheet_webhook');
+      if (webhookUrl) {
+        try {
+          fetch(webhookUrl, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(projData)
+          });
+        } catch (e) {
+          console.error('Sheet Sync Error:', e);
+        }
+      }
 
       if (!isOnline) {
         addToPendingQueue({ type: 'project', payload: projData });
@@ -789,7 +752,6 @@ export function useSync() {
           }
         }
       } catch (e) {
-        // Fallback local update
         setState((prev) => {
           const updatedProjects = prev.projects.map((p) =>
             p.id === projectId ? { ...p, status: 'Paid' as const } : p
