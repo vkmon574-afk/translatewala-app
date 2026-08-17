@@ -86,6 +86,73 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     .filter((t) => t.type === 'employee_payout' && t.paidByOwner === 'Shafiulla')
     .reduce((sum, t) => sum + t.amount, 0);
 
+  // Helper to parse dates reliably from "YYYY-MM-DD" or ISO strings
+  const parseTxDate = (dateStr?: string): { year: number; month: number } | null => {
+    if (!dateStr) return null;
+    const cleanStr = dateStr.split('T')[0];
+    const parts = cleanStr.split('-');
+    if (parts.length >= 2) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1; // 0-indexed month
+      if (!isNaN(y) && !isNaN(m)) return { year: y, month: m };
+    }
+    const d = new Date(dateStr);
+    if (!isNaN(d.getTime())) {
+      return { year: d.getFullYear(), month: d.getMonth() };
+    }
+    return null;
+  };
+
+  // Compute live rolling 6 months based on the current date
+  const now = new Date();
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const fullMonthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const liveMonthlyStats = Array.from({ length: 6 }).map((_, idx) => {
+    // 5 months ago up to the current active month (idx 0 to 5)
+    const targetDate = new Date(now.getFullYear(), now.getMonth() - (5 - idx), 1);
+    const y = targetDate.getFullYear();
+    const m = targetDate.getMonth();
+    const isCurrentMonth = idx === 5;
+
+    // Aggregate paid income for this specific month & year
+    const monthIncome = state.transactions
+      .filter((t) => {
+        if (t.type !== 'income' || (t.status !== 'Paid' && t.status !== 'Cleared')) return false;
+        const parsed = parseTxDate(t.date);
+        return parsed && parsed.year === y && parsed.month === m;
+      })
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    // Aggregate expenses/payouts for this specific month & year
+    const monthExpense = state.transactions
+      .filter((t) => {
+        if ((t.type !== 'expense' && t.type !== 'employee_payout') || t.status === 'Cancelled') return false;
+        const parsed = parseTxDate(t.date);
+        return parsed && parsed.year === y && parsed.month === m;
+      })
+      .reduce((sum, t) => sum + (Number(t.amount) || 0), 0);
+
+    return {
+      monthLabel: monthNames[m],
+      fullLabel: `${fullMonthNames[m]} ${y}`,
+      year: y,
+      month: m,
+      isCurrentMonth,
+      income: monthIncome,
+      expense: monthExpense,
+      profit: monthIncome - monthExpense
+    };
+  });
+
+  const maxMonthValue = Math.max(
+    ...liveMonthlyStats.map((item) => Math.max(item.income, item.expense)),
+    1000
+  );
+
   return (
     <div className="flex flex-col gap-6 pb-8">
       {/* Overview Header */}
@@ -220,44 +287,66 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
       {/* Financial Health Chart */}
       <section className="flex flex-col gap-3">
-        <h3 className="text-lg font-bold text-slate-900">Financial Health</h3>
+        <div className="flex items-center justify-between">
+          <h3 className="text-lg font-bold text-slate-900">Financial Health</h3>
+          <span className="text-[11px] font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-100">
+            Live 6-Month Real-time Trend
+          </span>
+        </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <div className="flex justify-between items-end h-32 mb-6 gap-3">
-            <div className="flex flex-col justify-end items-center flex-1 h-full gap-2 group">
-              <div className="w-full bg-blue-100 rounded-t-lg h-[40%] group-hover:bg-blue-200 transition-colors relative">
-                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {formatMoney(4200, currency)}
-                </span>
-              </div>
-              <span className="text-[10px] font-semibold text-slate-500">Sep</span>
-            </div>
+          <div className="flex justify-between items-end h-36 mb-6 gap-2 sm:gap-4 pt-6">
+            {liveMonthlyStats.map((item) => {
+              // Calculate relative bar height percentage based on real income
+              const hasData = item.income > 0 || item.expense > 0;
+              const heightPct = hasData
+                ? Math.max(16, Math.min(100, Math.round((item.income / maxMonthValue) * 100)))
+                : 10;
 
-            <div className="flex flex-col justify-end items-center flex-1 h-full gap-2 group">
-              <div className="w-full bg-blue-300 rounded-t-lg h-[60%] group-hover:bg-blue-400 transition-colors relative">
-                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {formatMoney(6100, currency)}
-                </span>
-              </div>
-              <span className="text-[10px] font-semibold text-slate-500">Oct</span>
-            </div>
+              return (
+                <div
+                  key={item.fullLabel}
+                  className="flex flex-col justify-end items-center flex-1 h-full gap-2 group relative"
+                  title={`${item.fullLabel}: Income ${formatMoney(item.income, currency)}, Expense ${formatMoney(item.expense, currency)}`}
+                >
+                  <div
+                    className={`w-full rounded-t-xl transition-all duration-300 relative flex items-start justify-center ${
+                      item.isCurrentMonth
+                        ? 'bg-primary shadow-sm ring-2 ring-blue-400/30'
+                        : item.income > 0
+                        ? 'bg-blue-400 group-hover:bg-blue-500'
+                        : 'bg-slate-100 group-hover:bg-slate-200'
+                    }`}
+                    style={{ height: `${heightPct}%` }}
+                  >
+                    {/* Amount label on hover or if current active month */}
+                    <div
+                      className={`absolute -top-7 left-1/2 -translate-x-1/2 whitespace-nowrap text-[10px] font-black px-1.5 py-0.5 rounded-md transition-all z-20 pointer-events-none ${
+                        item.isCurrentMonth
+                          ? 'text-primary bg-blue-50 border border-blue-200 opacity-100 shadow-2xs'
+                          : 'text-slate-700 bg-white border border-slate-200 opacity-0 group-hover:opacity-100 shadow-2xs'
+                      }`}
+                    >
+                      {formatMoney(item.income, currency)}
+                    </div>
+                  </div>
 
-            <div className="flex flex-col justify-end items-center flex-1 h-full gap-2 group">
-              <div className="w-full bg-blue-400 rounded-t-lg h-[85%] group-hover:bg-blue-500 transition-colors relative">
-                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity">
-                  {formatMoney(9800, currency)}
-                </span>
-              </div>
-              <span className="text-[10px] font-semibold text-slate-500">Nov</span>
-            </div>
-
-            <div className="flex flex-col justify-end items-center flex-1 h-full gap-2 group">
-              <div className="w-full bg-primary rounded-t-lg h-[100%] relative">
-                <span className="absolute -top-6 left-1/2 -translate-x-1/2 text-[10px] font-bold text-primary">
-                  {formatMoney(12450, currency)}
-                </span>
-              </div>
-              <span className="text-[10px] font-bold text-primary">Dec</span>
-            </div>
+                  <div className="flex flex-col items-center gap-0.5">
+                    <span
+                      className={`text-[11px] transition-colors ${
+                        item.isCurrentMonth
+                          ? 'font-black text-primary'
+                          : 'font-semibold text-slate-500 group-hover:text-slate-800'
+                      }`}
+                    >
+                      {item.monthLabel}
+                    </span>
+                    {item.isCurrentMonth && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100">
@@ -360,39 +449,47 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           {/* Top Languages */}
           <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
             <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-4">
-              Top Languages
+              Language Breakdown
             </h4>
-            <div className="flex flex-col gap-4">
-              <div>
-                <div className="flex justify-between text-xs font-medium mb-1 text-slate-700">
-                  <span>Arabic</span>
-                  <span className="font-bold">45%</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                  <div className="bg-primary h-full rounded-full" style={{ width: '45%' }} />
-                </div>
-              </div>
+            {(() => {
+              const langCount: Record<string, number> = {};
+              state.projects.forEach((p) => {
+                const target = p.targetLang || 'English';
+                langCount[target] = (langCount[target] || 0) + 1;
+              });
+              const total = state.projects.length;
+              const entries = Object.entries(langCount).sort((a, b) => b[1] - a[1]);
 
-              <div>
-                <div className="flex justify-between text-xs font-medium mb-1 text-slate-700">
-                  <span>Bengali</span>
-                  <span className="font-bold">30%</span>
-                </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                  <div className="bg-emerald-600 h-full rounded-full" style={{ width: '30%' }} />
-                </div>
-              </div>
+              if (entries.length === 0) {
+                return (
+                  <div className="py-6 text-center text-slate-400">
+                    <p className="text-xs font-medium">No language data recorded yet.</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Create a project to track language stats.</p>
+                  </div>
+                );
+              }
 
-              <div>
-                <div className="flex justify-between text-xs font-medium mb-1 text-slate-700">
-                  <span>Hindi</span>
-                  <span className="font-bold">15%</span>
+              const colors = ['bg-primary', 'bg-emerald-600', 'bg-amber-600', 'bg-purple-600'];
+
+              return (
+                <div className="flex flex-col gap-3.5">
+                  {entries.slice(0, 4).map(([lang, count], idx) => {
+                    const pct = Math.round((count / total) * 100);
+                    return (
+                      <div key={lang}>
+                        <div className="flex justify-between text-xs font-medium mb-1 text-slate-700">
+                          <span>{lang}</span>
+                          <span className="font-bold">{pct}% ({count})</span>
+                        </div>
+                        <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
+                          <div className={`${colors[idx % colors.length]} h-full rounded-full`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
-                  <div className="bg-amber-600 h-full rounded-full" style={{ width: '15%' }} />
-                </div>
-              </div>
-            </div>
+              );
+            })()}
           </div>
         </div>
       </section>
@@ -410,45 +507,51 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-100">
-          <div className="flex flex-col gap-4 relative before:absolute before:inset-y-0 before:left-3.5 before:w-0.5 before:bg-slate-100">
-            <div className="flex gap-4 relative z-10">
-              <div className="w-7 h-7 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 border-2 border-white">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-slate-900">
-                  Project <span className="font-bold">#104</span> Completed
-                </p>
-                <p className="text-xs text-slate-500">Qatar Media - English to Arabic</p>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">2 hours ago</span>
-              </div>
+          {state.transactions.length === 0 && state.projects.length === 0 ? (
+            <div className="py-8 text-center text-slate-400">
+              <p className="text-sm font-semibold text-slate-600">Fresh Workspace Ready</p>
+              <p className="text-xs text-slate-400 mt-1">
+                No recent activity. All client billings, payouts, and project logs will appear here in real-time.
+              </p>
             </div>
-
-            <div className="flex gap-4 relative z-10">
-              <div className="w-7 h-7 rounded-full bg-blue-100 text-primary flex items-center justify-center shrink-0 border-2 border-white">
-                <CreditCard className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-slate-900">Payment Received</p>
-                <p className="text-xs text-slate-500">
-                  <span className="font-bold text-primary">+{formatMoney(1500, currency)}</span> from
-                  Dubai Tech
-                </p>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">Yesterday</span>
-              </div>
+          ) : (
+            <div className="flex flex-col gap-4 relative before:absolute before:inset-y-0 before:left-3.5 before:w-0.5 before:bg-slate-100">
+              {state.transactions.slice(0, 5).map((tx) => (
+                <div key={tx.id} className="flex gap-4 relative z-10">
+                  <div
+                    className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 border-2 border-white ${
+                      tx.type === 'income'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : tx.type === 'employee_payout'
+                        ? 'bg-blue-100 text-primary'
+                        : 'bg-purple-100 text-purple-800'
+                    }`}
+                  >
+                    {tx.type === 'income' ? (
+                      <CheckCircle2 className="w-4 h-4" />
+                    ) : tx.type === 'employee_payout' ? (
+                      <CreditCard className="w-4 h-4" />
+                    ) : (
+                      <FileText className="w-4 h-4" />
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-baseline justify-between">
+                      <p className="text-sm font-semibold text-slate-900">{tx.title}</p>
+                      <span className={`text-xs font-bold ${tx.type === 'income' ? 'text-emerald-600' : 'text-slate-900'}`}>
+                        {tx.type === 'income' ? '+' : '-'}{formatMoney(tx.amount, currency)}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      {tx.clientName ? `Client: ${tx.clientName}` : tx.employeeName ? `Employee: ${tx.employeeName}` : tx.category} • {tx.method}
+                      {tx.paidByOwner ? ` (Paid by ${tx.paidByOwner})` : ''}
+                    </p>
+                    <span className="text-[10px] text-slate-400 mt-0.5 block">{tx.date}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-
-            <div className="flex gap-4 relative z-10">
-              <div className="w-7 h-7 rounded-full bg-purple-100 text-purple-800 flex items-center justify-center shrink-0 border-2 border-white">
-                <FileText className="w-4 h-4" />
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-semibold text-slate-900">New Invoice Created</p>
-                <p className="text-xs text-slate-500">Invoice #INV-2023-089 sent to GCC Partners</p>
-                <span className="text-[10px] text-slate-400 mt-0.5 block">2 days ago</span>
-              </div>
-            </div>
-          </div>
+          )}
         </div>
       </section>
     </div>

@@ -38,6 +38,8 @@ export default function App() {
     receiveProjectPayment,
     setCurrency,
     setActiveOwner,
+    clearAllDemoData,
+    syncGoogleSheets,
     flushPendingQueue
   } = useSync();
 
@@ -323,6 +325,8 @@ export default function App() {
         <GoogleSheetsSyncModal
           state={state}
           onClose={() => setIsGoogleSheetsModalOpen(false)}
+          onSyncGoogleSheets={syncGoogleSheets}
+          onClearAllDemoData={clearAllDemoData}
         />
       )}
 

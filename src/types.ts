@@ -98,6 +98,8 @@ export interface AppState {
   activeOwner: Owner;
   currency: Currency;
   lastSyncTimestamp: string;
+  googleSheetWebhook?: string;
+  autoSyncGoogleSheets?: boolean;
 }
 
 export interface ActivityItem {

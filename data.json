@@ -1,0 +1,41 @@
+{
+  "activeOwner": "Shafiulla",
+  "currency": "INR",
+  "lastSyncTimestamp": "2026-08-17T06:17:00.000Z",
+  "clients": [],
+  "team": [
+    {
+      "id": "tm-1",
+      "name": "Mohiyuddin",
+      "role": "Managing Partner • Arabic Specialist",
+      "type": "Employee",
+      "avatar": "",
+      "phone": "+91 98765 43210",
+      "email": "mohiyuddin@translatewala.com",
+      "upiId": "mohiyuddin@upi",
+      "projectsCount": 0,
+      "totalEarned": 0,
+      "paidAmount": 0,
+      "pendingAmount": 0,
+      "lastPaidDate": "N/A"
+    },
+    {
+      "id": "tm-2",
+      "name": "Shafiulla",
+      "role": "Managing Partner • Operations",
+      "type": "Employee",
+      "avatar": "",
+      "phone": "+91 98123 45678",
+      "email": "shafiulla@translatewala.com",
+      "upiId": "shafiulla@upi",
+      "projectsCount": 0,
+      "totalEarned": 0,
+      "paidAmount": 0,
+      "pendingAmount": 0,
+      "lastPaidDate": "N/A"
+    }
+  ],
+  "projects": [],
+  "transactions": [],
+  "autoSyncGoogleSheets": true
+}
